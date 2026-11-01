@@ -1,0 +1,10 @@
+{
+  "tuningTelemetry_mark": {
+    "cat": "tuningTelemetry",
+    "order": 1,
+    "ctx": "tlua",
+    "onDown": "if extensions.tuningTelemetry_main then extensions.tuningTelemetry_main.mark() end",
+    "title": "Mark moment",
+    "desc": "Drop a marker in the telemetry recording at the moment something goes wrong"
+  }
+}
