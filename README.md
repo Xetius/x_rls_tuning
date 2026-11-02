@@ -36,6 +36,14 @@ Each frame (`type: "frame"`):
   load, drive torque, brake torque, brake temperature, tyre temperature, tyre pressure (psi),
   surface material.
 - **`d`, per shock absorber:** compression in mm relative to its length when the car spawned.
+- **`gin`, `revLim`:** gearbox input rpm and whether the rev limiter is cutting.
+- **`chute`:** 1 while Meo's drag parachute is deployed (absent on cars without one).
+- **`fuelx`, RLS Career Overhaul 2.8+ fuel & ignition model** (absent without it): actual and
+  target AFR (`afr`, `tafr`), map timing trim and timing after knock retard (`tim`, `etim`),
+  knock retard (`kr`), knock / lean / rich severity, fuel delivery duty (`duty`; over 1 means
+  the `dlim` injector or pump can't keep up), torque multiplier (`tq`), charge cooling,
+  boost fuel cut, and accumulated knock / lean damage exposure (`xk`, `xl`). `native: true`
+  means the stock calibration is running and RLS only estimates these values.
 
 Events: `mark`, `note`, `reset` (vehicle reset, so a teleport isn't read as a crash),
 `configSnapshot` and `metaSnapshot` (stored in full under `configs/` and `meta/`, written
@@ -43,8 +51,8 @@ once per distinct content). Each line also has `rt`, the wall-clock receive time
 
 ## Status
 
-- The recorder has been tested with `test/fake_sender.py`, but the mod has not been run in
-  the game yet.
+- Used in game with RLS Career Overhaul since 2026-11-02. The `fuelx` readings are not yet
+  tested in game.
 - Shock absorbers are found by their `vkTag: damper_XX` tag (vanilla cars). Cars without
   the tag fall back to a heuristic (split bump/rebound damping, no spring); check the
   recorder's `[meta]` line to see what was found.
