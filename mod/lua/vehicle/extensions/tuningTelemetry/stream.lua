@@ -140,6 +140,33 @@ local function buildMeta()
   }
 end
 
+-- RLS Career Overhaul (2.8+) fuel & ignition model: rlsFuelRuntime hangs its
+-- per-engine context on the engine device and refreshes context.response each frame
+local function rlsFuel()
+  local c = engine and engine.rlsFuelContext
+  local fr = type(c) == "table" and c.response
+  if type(fr) ~= "table" or not fr.afr then return nil end
+  local exposure = c.state and c.state.exposure
+  return {
+    native = fr.mode == "native" or nil, -- stock calibration: RLS only estimates these values
+    afr = r(fr.afr, 2),
+    tafr = r(fr.targetAFR, 2),
+    tim = r(fr.timing, 2), -- map timing trim, degrees relative to stock
+    etim = r(fr.effectiveTiming, 2), -- after knock retard
+    kr = r(fr.knockRetard, 2),
+    knock = r(fr.knock, 3),
+    lean = r(fr.leanSeverity, 3),
+    rich = r(fr.richSeverity, 3),
+    duty = r(fr.deliveryDuty, 3), -- fuel demand / injector-or-pump capacity
+    dlim = fr.deliveryLimit,
+    tq = r(fr.torque, 3), -- torque multiplier from mixture/timing/knock
+    cool = r(fr.chargeCoolingC, 1),
+    cut = fr.boostFuelCut or nil,
+    xk = exposure and r(exposure.knock, 4), -- accumulated damage exposure (rings fail at 0.25 total)
+    xl = exposure and r(exposure.lean, 4),
+  }
+end
+
 local function buildFrame()
   local e = electrics.values
   local roll, pitch = obj:getRollPitchYaw()
@@ -215,6 +242,7 @@ local function buildFrame()
     pitchRate = r(pitchRate, 4),
     yawRate = r(yawRate, 4),
     pos = {r(px, 2), r(py, 2), r(pz, 2)},
+    fuelx = rlsFuel(),
     w = w,
     d = d,
   }
