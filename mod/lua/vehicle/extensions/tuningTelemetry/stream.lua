@@ -67,15 +67,24 @@ local function findDampers()
       covered[corner] = true
     end
   end
+  -- one damper per uncovered wheel: the candidate with a node closest to the hub
+  -- (wheelie bar or link dampers can also sit within reach of a rear wheel)
+  local best = {}
   for _, b in pairs(beams) do
     local beamType = b.beamType or 0
     if type(b.beamDampRebound) == "number" and b.beamDampRebound > 0 and (b.beamSpring or 0) <= 1000
         and (beamType == 0 or beamType == 2) and not (type(b.vkTag) == "string" and b.vkTag:find("^damper")) then
-      local corner, dist = nearestWheel(b.id1)
-      if corner and dist < 1.0 and not covered[corner] then
-        table.insert(found, {beam = b, corner = corner, source = "heuristic"})
+      local corner1, dist1 = nearestWheel(b.id1)
+      local corner2, dist2 = nearestWheel(b.id2)
+      local corner, dist = corner1, dist1
+      if dist2 < dist1 then corner, dist = corner2, dist2 end
+      if corner and dist < 1.0 and not covered[corner] and (not best[corner] or dist < best[corner].dist) then
+        best[corner] = {beam = b, corner = corner, source = "heuristic", dist = dist}
       end
     end
+  end
+  for _, f in pairs(best) do
+    table.insert(found, f)
   end
 
   for _, f in ipairs(found) do

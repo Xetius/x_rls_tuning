@@ -32,6 +32,12 @@ local function send(str)
   end
 end
 
+-- the player's vehicle, or nil while on foot (walking mode drives the "unicycle" character)
+local function getDrivenVehicle()
+  local veh = getPlayerVehicle(0)
+  if veh and veh:getJBeamFilename() ~= "unicycle" then return veh end
+end
+
 local function ensureStreamer(veh)
   veh:queueLuaCommand('if not extensions.tuningTelemetry_stream then extensions.load("tuningTelemetry_stream") end')
 end
@@ -87,7 +93,7 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   if checkTimer < checkPeriod then return end
   checkTimer = 0
 
-  local veh = getPlayerVehicle(0)
+  local veh = getDrivenVehicle()
   if not veh then return end
   ensureStreamer(veh)
   if configTimer >= configPeriod then
@@ -97,14 +103,14 @@ local function onUpdate(dtReal, dtSim, dtRaw)
 end
 
 local function onVehicleSwitched(oldId, newId)
-  local veh = getPlayerVehicle(0)
+  local veh = getDrivenVehicle()
   if not veh then return end
   ensureStreamer(veh)
   sendConfig(veh)
 end
 
 local function onVehicleSpawned(vid)
-  local veh = getPlayerVehicle(0)
+  local veh = getDrivenVehicle()
   if veh and veh:getID() == vid then
     ensureStreamer(veh)
     configTimer = configPeriod -- send the new config on the next check, once the vehicle has settled
@@ -112,7 +118,7 @@ local function onVehicleSpawned(vid)
 end
 
 local function mark()
-  local veh = getPlayerVehicle(0)
+  local veh = getDrivenVehicle()
   if not veh then return end
   veh:queueLuaCommand("if extensions.tuningTelemetry_stream then extensions.tuningTelemetry_stream.mark() end")
 end
