@@ -21,16 +21,16 @@ vehicle's parts and tuning can be adjusted from that.
 
 ## Install from a release
 
-1. Download `tuning_telemetry_<version>.zip` and put it, still zipped, in
+1. Download `x_rls_tuning_<version>.zip` and put it, still zipped, in
    `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods`. Enable it in the game's mod manager
    if it isn't already.
-2. Download `tuning_telemetry_recorder_<version>.zip` and unzip it anywhere. It needs
+2. Download `x_rls_tuning_recorder_<version>.zip` and unzip it anywhere. It needs
    [Python 3.9 or newer](https://www.python.org/downloads/) (standard library only).
    Sessions are saved in a `sessions` folder next to it.
 3. Carry on from step 2 of **Use** below.
 
 Don't have the release zip and the `install.ps1` development copy
-(`mods\unpacked\tuning_telemetry`) installed at the same time: both would load.
+(`mods\unpacked\x_rls_tuning`) installed at the same time: both would load.
 
 ## Making a release
 

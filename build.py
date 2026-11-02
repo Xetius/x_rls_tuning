@@ -1,7 +1,7 @@
 """Builds the release zips into dist/:
 
-    tuning_telemetry_<version>.zip            the BeamNG mod: put it in the game's mods folder
-    tuning_telemetry_recorder_<version>.zip   the recorder: unzip anywhere, needs Python 3.9+
+    x_rls_tuning_<version>.zip            the BeamNG mod: put it in the game's mods folder
+    x_rls_tuning_recorder_<version>.zip   the recorder: unzip anywhere, needs Python 3.9+
 
 Run:  py build.py                  (version from `git describe`, else "dev")
       py build.py --version 1.2.0
@@ -39,7 +39,7 @@ def add(zf: zipfile.ZipFile, name: str, data: bytes):
 
 
 def build_mod(version: str, out: Path) -> Path:
-    path = out / f"tuning_telemetry_{version}.zip"
+    path = out / f"x_rls_tuning_{version}.zip"
     with zipfile.ZipFile(path, "w") as zf:
         for f in sorted(p for p in MOD.rglob("*") if p.is_file()):
             name = f.relative_to(MOD).as_posix()
@@ -54,8 +54,8 @@ def build_mod(version: str, out: Path) -> Path:
 
 
 def build_recorder(version: str, out: Path) -> Path:
-    path = out / f"tuning_telemetry_recorder_{version}.zip"
-    top = "tuning_telemetry_recorder"
+    path = out / f"x_rls_tuning_recorder_{version}.zip"
+    top = "x_rls_tuning_recorder"
     with zipfile.ZipFile(path, "w") as zf:
         for name in RECORDER_FILES:
             add(zf, f"{top}/{name}", (ROOT / name).read_bytes())
