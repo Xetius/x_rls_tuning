@@ -1,10 +1,11 @@
 # Builds the mod and recorder zips and publishes them as a GitHub release
-# whenever a version tag is pushed, e.g.:  git tag v1.0.0 && git push origin v1.0.0
+# whenever a version tag is pushed, e.g.:  git tag 1.0.0 && git push origin 1.0.0
+# (a leading v, as in v1.0.0, is also accepted and dropped from the version)
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["[0-9]*", "v[0-9]*"]
 
 permissions:
   contents: write
@@ -37,4 +38,4 @@ jobs:
           prerelease=""
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/*.zip \
-            --title "Tuning Telemetry $GITHUB_REF_NAME" --generate-notes $prerelease
+            --title "x_rls_tuning ${GITHUB_REF_NAME#v}" --generate-notes $prerelease

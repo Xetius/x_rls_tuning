@@ -17,7 +17,7 @@ vehicle's parts and tuning can be adjusted from that.
 | `recorder/recorder.py` | The console recorder (`record.cmd`), e.g. `py recorder\recorder.py --mode drift`. |
 | `test/fake_sender.py` | Pretends to be the game, to test the recorder without BeamNG. |
 | `build.py` | Builds the release zips into `dist/`. |
-| `.github/workflows/release.yml` | Builds and publishes a GitHub release when a `v*` tag is pushed. |
+| `.github/workflows/release.yml` | Builds and publishes a GitHub release when a version tag (e.g. `1.0.0`) is pushed. |
 
 ## Install from a release
 
@@ -35,13 +35,13 @@ Don't have the release zip and the `install.ps1` development copy
 ## Making a release
 
 ```
-git tag v1.0.0
-git push origin v1.0.0
+git tag 1.0.0
+git push origin 1.0.0
 ```
 
 The workflow checks that the Lua and Python compile, runs `build.py` with the tag's version
 (written into the mod, so each recording's config says which version made it) and attaches
-both zips to a new GitHub release. A tag with a hyphen (`v1.1.0-beta1`) is marked as a
+both zips to a new GitHub release. A tag with a hyphen (`1.1.0-beta1`) is marked as a
 pre-release. To build locally: `py build.py` (or `--version 1.0.0`).
 
 ## Use
