@@ -52,24 +52,28 @@ local function sameNodes(a, b)
   return (a.id1 == b.id1 and a.id2 == b.id2) or (a.id1 == b.id2 and a.id2 == b.id1)
 end
 
--- Shock absorbers. Vanilla cars tag them with vkTag "damper_XX"; for untagged cars,
--- fall back to beams with split bump/rebound damping and (almost) no spring.
+-- Shock absorbers. Vanilla cars tag them with vkTag "damper_XX". Modded parts often
+-- don't (Meo's drag rear coilover), so any wheel still without a damper falls back to
+-- beams with split bump/rebound damping and (almost) no spring, normal or bounded.
 local function findDampers()
   dampers = {}
   local beams = v.data.beams or {}
   local found = {}
+  local covered = {}
   for _, b in pairs(beams) do
     if type(b.vkTag) == "string" and b.vkTag:find("^damper") then
-      table.insert(found, {beam = b, corner = b.vkTag:match("^damper_(.+)$"), source = "vkTag"})
+      local corner = b.vkTag:match("^damper_(.+)$") or nearestWheel(b.id1)
+      table.insert(found, {beam = b, corner = corner, source = "vkTag"})
+      covered[corner] = true
     end
   end
-  if #found == 0 then
-    for _, b in pairs(beams) do
-      if type(b.beamDampRebound) == "number" and b.beamDampRebound > 0 and (b.beamSpring or 0) <= 1000 and (b.beamType or 0) == 0 then
-        local corner, dist = nearestWheel(b.id1)
-        if corner and dist < 1.0 then
-          table.insert(found, {beam = b, corner = corner, source = "heuristic"})
-        end
+  for _, b in pairs(beams) do
+    local beamType = b.beamType or 0
+    if type(b.beamDampRebound) == "number" and b.beamDampRebound > 0 and (b.beamSpring or 0) <= 1000
+        and (beamType == 0 or beamType == 2) and not (type(b.vkTag) == "string" and b.vkTag:find("^damper")) then
+      local corner, dist = nearestWheel(b.id1)
+      if corner and dist < 1.0 and not covered[corner] then
+        table.insert(found, {beam = b, corner = corner, source = "heuristic"})
       end
     end
   end
@@ -77,7 +81,7 @@ local function findDampers()
   for _, f in ipairs(found) do
     local b = f.beam
     local d = {
-      corner = f.corner or nearestWheel(b.id1),
+      corner = f.corner,
       cid = b.cid,
       source = f.source,
       restLength = obj:getBeamRestLength(b.cid),
@@ -87,13 +91,14 @@ local function findDampers()
       reboundFast = b.beamDampReboundFast,
       velocitySplit = b.beamDampVelocitySplit,
     }
-    -- bump stop / travel limiter on the same node pair
+    -- bump stop on the same node pair: the bounded beam there with the largest compression range
+    -- (Meo's coilover puts spring, damper and bump stop all on one node pair)
     for _, s in pairs(beams) do
-      if s.beamType == 2 and sameNodes(s, b) then
+      if s ~= b and s.beamType == 2 and sameNodes(s, b) and type(s.shortBoundRange) == "number"
+          and s.shortBoundRange > (d.shortBoundRange or 0) then
         d.shortBoundRange = s.shortBoundRange
         d.longBoundRange = s.longBoundRange
         d.boundZone = s.boundZone
-        break
       end
     end
     table.insert(dampers, d)

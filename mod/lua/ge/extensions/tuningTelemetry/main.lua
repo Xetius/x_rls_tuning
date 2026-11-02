@@ -47,9 +47,24 @@ local function sendConfig(veh)
     parts = core_vehicle_partmgmt.partsTreeToPartsMap(config.partsTree)
   end
 
-  local inventoryId
-  if career_modules_inventory and career_modules_inventory.getInventoryIdFromVehicleId then
-    inventoryId = career_modules_inventory.getInventoryIdFromVehicleId(vid)
+  -- RLS Career Overhaul replaces the vanilla career modules with overhaul_career_*
+  local career, inventoryId, saveSlot, savePath
+  if overhaul_career_career and overhaul_career_career.isActive and overhaul_career_career.isActive() then
+    career = "rls"
+    if overhaul_career_garage_inventory and overhaul_career_garage_inventory.getInventoryIdFromVehicleId then
+      inventoryId = overhaul_career_garage_inventory.getInventoryIdFromVehicleId(vid)
+    end
+    if overhaul_career_saveSystem and overhaul_career_saveSystem.getCurrentProfile then
+      saveSlot, savePath = overhaul_career_saveSystem.getCurrentProfile()
+    end
+  elseif career_career and career_career.isActive and career_career.isActive() then
+    career = "vanilla"
+    if career_modules_inventory and career_modules_inventory.getInventoryIdFromVehicleId then
+      inventoryId = career_modules_inventory.getInventoryIdFromVehicleId(vid)
+    end
+    if career_saveSystem and career_saveSystem.getCurrentProfile then
+      saveSlot, savePath = career_saveSystem.getCurrentProfile()
+    end
   end
 
   send(jsonEncode({
@@ -57,8 +72,10 @@ local function sendConfig(veh)
     vid = vid,
     model = veh:getJBeamFilename(),
     partConfigFilename = config.partConfigFilename,
+    career = career or false,
     inventoryId = inventoryId,
-    career = career_career and career_career.isActive and career_career.isActive() or false,
+    saveSlot = saveSlot,
+    savePath = savePath,
     parts = parts,
     vars = config.vars,
   }))

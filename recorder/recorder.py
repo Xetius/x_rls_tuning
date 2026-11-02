@@ -108,7 +108,8 @@ def handle(session: Session, chunks: Chunks, msg: dict):
         if session.snapshot("configs", msg):
             session.model = msg.get("model")
             vars_count = len(msg.get("vars") or {})
-            print(f"[config] {msg.get('model')} (vehicle {msg.get('vid')}, inventory {msg.get('inventoryId')}), "
+            where = f"{msg['career']} career, save {msg.get('saveSlot')}, inventory {msg.get('inventoryId')}" if msg.get("career") else "not in career"
+            print(f"[config] {msg.get('model')} (vehicle {msg.get('vid')}, {where}), "
                   f"{len(msg.get('parts') or {})} parts, {vars_count} tuning vars")
     elif kind == "meta":
         if session.snapshot("meta", msg):
