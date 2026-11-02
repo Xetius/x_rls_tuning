@@ -8,26 +8,56 @@ vehicle's parts and tuning can be adjusted from that.
 
 | Path | What it does |
 |---|---|
-| `mod/lua/vehicle/extensions/tuningTelemetry/stream.lua` | Runs inside the player's vehicle. Sends a JSON frame over UDP (`127.0.0.1:4445`) 50 times per second of sim time, plus metadata (wheels, detected shock absorbers) every 5 s. |
-| `mod/lua/ge/extensions/tuningTelemetry/main.lua` | Game-engine side. Keeps the streamer loaded in whatever car you drive (part changes respawn the car), sends the car's parts and tuning vars every 5 s, and handles the mark action. |
+| `mod/lua/vehicle/extensions/tuningTelemetry/stream.lua` | Runs inside the player's vehicle (and anything coupled to it). Sends JSON frames over UDP (`127.0.0.1:4445`) at the rate of the current driving mode, plus metadata (wheels, detected shock absorbers, switchable diffs/4WD/range box) every 5 s. |
+| `mod/lua/ge/extensions/tuningTelemetry/main.lua` | Game-engine side. Keeps the streamer loaded in whatever car you drive (part changes respawn the car) and in coupled trailers, sends their parts and tuning vars every 5 s, handles the mark action, and takes commands (driving mode, mark) from the recorder on UDP `4446`. |
 | `mod/lua/ge/extensions/core/input/actions/tuningTelemetry.json` | The **Mark moment** control (Options → Controls → Tuning Telemetry). |
 | `mod/settings/inputmaps/keyboard_tuningTelemetry.json` | Default key for Mark: **Alt+M** (unused by the game and the installed mods when this was written). Bind a wheel button to it in Controls. |
-| `recorder/recorder.py` | Listens on UDP 4445 and writes a session folder under `sessions/`. Standard-library Python only. |
+| `recorder/core.py` | The recording engine: listens on UDP 4445, writes a session folder under `sessions/`, sends commands to the game. Standard-library Python only. |
+| `recorder/recorder_gui.py` | The recorder window (`record_gui.cmd`). |
+| `recorder/recorder.py` | The console recorder (`record.cmd`), e.g. `py recorder\recorder.py --mode drift`. |
+| `test/fake_sender.py` | Pretends to be the game, to test the recorder without BeamNG. |
 
 ## Use
 
 1. Run `install.ps1` once (and again after changing anything in `mod/`).
-2. Start the recorder: double-click `record.cmd`, or `py recorder\recorder.py`.
-3. Drive. When the car does something wrong, press **Mark** (Alt+M or your bound button).
-   A "Telemetry mark N" message shows in game, and the recorder prints the mark.
-4. Optionally type a description into the recorder window and press Enter; it is saved
-   as a note on the latest mark.
-5. Ctrl+C in the recorder window to stop.
+2. Start the recorder: double-click `record_gui.cmd` (window) or `record.cmd` (console).
+3. Pick the **driving mode** in the dropdown (see below). The game switches within a
+   couple of seconds; the status bar shows the mode the game confirmed.
+4. Drive. When the car does something wrong, press **Mark** (Alt+M, your bound button, or
+   the Mark button in the window). A "Telemetry mark N" message shows in game and the mark
+   appears in the marks list.
+5. Type a description in the Note box and press Enter. It goes to the selected mark, or
+   the latest one if none is selected. (Console: type and press Enter.)
+6. **New session** starts a new folder (e.g. for a different car or discipline);
+   closing the window stops recording.
+
+### Driving modes
+
+The mode decides which fields are sent and how often, so the files hold what matters for
+that kind of driving. Every mode sends the core fields (below).
+
+| Mode | Rate | Adds |
+|---|---|---|
+| `all` (default) | 50 Hz | everything |
+| `road` | 20 Hz | drivetrain, chassis, wheels + tyre/brake heat, temperatures, aids, fuel, diff/4WD modes |
+| `race` | 50 Hz | drivetrain, chassis, wheels + heat, suspension, temperatures, aids, fuel |
+| `drift` | 50 Hz | drivetrain, chassis, wheels + heat, suspension, temperatures, aids |
+| `drag` | 50 Hz | drivetrain, chassis, wheels, suspension, temperatures, fuel, parachute |
+| `offroad` | 25 Hz | drivetrain, chassis, wheels, suspension, temperatures, aids, diff/4WD modes |
+| `truck` | 10 Hz | drivetrain, chassis, wheels + heat, suspension, temperatures, aids, fuel, diff/4WD modes |
+| `pull` | 50 Hz | drivetrain, chassis, wheels, suspension, temperatures, fuel, diff/4WD modes |
+
+Anything coupled to the driven vehicle (trailer, dolly...) streams its own frames with
+`role: "trailer"` at 10 Hz: chassis, wheels with heat, and suspension.
 
 ## Data recorded
 
 Each frame (`type: "frame"`):
 
+- **Core (every mode):** vehicle id `vid` (and `role` for trailers), `seq`, game time `t`,
+  speed, rpm, gear, throttle, brake and steering (actual and raw input), `gx/gy`, yaw rate,
+  compass heading `hdg` (degrees), slip angle `slipAng` (degrees, + = travelling left of
+  where the nose points; only above 2 m/s), position.
 - **Driver inputs and drivetrain:** speed (`spd`, m/s), wheel speed, rpm, gear, throttle,
   brake, clutch, steering (and the raw inputs), handbrake, engine load, boost, temperatures, fuel.
 - **Driver aids:** whether ABS, traction control and ESC are active.
@@ -37,6 +67,8 @@ Each frame (`type: "frame"`):
   surface material.
 - **`d`, per shock absorber:** compression in mm relative to its length when the car spawned.
 - **`gin`, `revLim`:** gearbox input rpm and whether the rev limiter is cutting.
+- **`pm`:** the mode of each switchable diff, transfer case and range box (e.g. `open`,
+  `locked`, `lsd`; 4WD `connected` / `disconnected`; range `high` / `low`).
 - **`chute`:** 1 while Meo's drag parachute is deployed (absent on cars without one).
 - **`fuelx`, RLS Career Overhaul 2.8+ fuel & ignition model** (absent without it): actual and
   target AFR (`afr`, `tafr`), map timing trim and timing after knock retard (`tim`, `etim`),
@@ -45,14 +77,17 @@ Each frame (`type: "frame"`):
   boost fuel cut, and accumulated knock / lean damage exposure (`xk`, `xl`). `native: true`
   means the stock calibration is running and RLS only estimates these values.
 
-Events: `mark`, `note`, `reset` (vehicle reset, so a teleport isn't read as a crash),
+Events: `mark`, `note`, `reset`, `modeSet` (mode picked in the recorder), `modeAck` and
+`mode` (the game switched; `mode` per vehicle, with its rate) (vehicle reset, so a teleport isn't read as a crash),
 `configSnapshot` and `metaSnapshot` (stored in full under `configs/` and `meta/`, written
 once per distinct content). Each line also has `rt`, the wall-clock receive time.
 
 ## Status
 
-- Used in game with RLS Career Overhaul since 2026-11-02. The `fuelx` readings are not yet
-  tested in game.
+- Used in game with RLS Career Overhaul since 2026-11-02. Not yet tested in game: the
+  `fuelx` readings, driving modes, trailer frames, `hdg`/`slipAng`/`pm`, and the recorder
+  window (tested against `test/fake_sender.py` only).
+- Not recorded yet: the pulling force on a hitch or sled.
 - Shock absorbers are found by their `vkTag: damper_XX` tag (vanilla cars). Cars without
   the tag fall back to a heuristic (split bump/rebound damping, no spring); check the
   recorder's `[meta]` line to see what was found.
