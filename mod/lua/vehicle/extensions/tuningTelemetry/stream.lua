@@ -197,6 +197,7 @@ local function buildFrame()
     steer = r(e.steering, 1),
     steerIn = r(e.steering_input, 3),
     pbrk = r(e.parkingbrake, 2),
+    chute = e.meosParachute, -- Meo's drag parachute: 1 while deployed, nil without one
     load = r(e.engineLoad, 3),
     boost = r(e.turboBoost, 2),
     wtemp = r(e.watertemp, 1),
