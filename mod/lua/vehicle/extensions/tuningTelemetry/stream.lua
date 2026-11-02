@@ -21,6 +21,9 @@ local seq = 0
 local markCount = 0
 local dampers = {}
 local meta
+local engine, gearbox
+local avToRPM = 30 / math.pi
+local minShockDamp = 500 -- real shocks are thousands; link and wheelie-bar dampers are tens to hundreds
 
 local function r(x, decimals)
   if type(x) ~= "number" or x ~= x then return nil end
@@ -72,7 +75,7 @@ local function findDampers()
   local best = {}
   for _, b in pairs(beams) do
     local beamType = b.beamType or 0
-    if type(b.beamDampRebound) == "number" and b.beamDampRebound > 0 and (b.beamSpring or 0) <= 1000
+    if type(b.beamDampRebound) == "number" and b.beamDampRebound >= minShockDamp and (b.beamSpring or 0) <= 1000
         and (beamType == 0 or beamType == 2) and not (type(b.vkTag) == "string" and b.vkTag:find("^damper")) then
       local corner1, dist1 = nearestWheel(b.id1)
       local corner2, dist2 = nearestWheel(b.id2)
@@ -182,6 +185,8 @@ local function buildFrame()
     spd = r(e.airspeed, 2),
     wspd = r(e.wheelspeed, 2),
     rpm = r(e.rpm, 0),
+    gin = gearbox and r(gearbox.inputAV * avToRPM, 0), -- gearbox input rpm: what the automatic's shift points compare against
+    revLim = engine and engine.revLimiterActive or nil,
     gear = e.gear,
     gi = e.gearIndex,
     thr = r(e.throttle, 3),
@@ -245,6 +250,8 @@ end
 
 local function onExtensionLoaded()
   udp = socket.udp()
+  engine = powertrain.getDevice("mainEngine")
+  gearbox = powertrain.getDevice("gearbox")
   findDampers()
   buildMeta()
   send(meta)
