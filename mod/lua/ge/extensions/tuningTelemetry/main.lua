@@ -8,6 +8,7 @@ local M = {}
 
 local socket = require("socket.socket")
 
+local version = "dev" -- build.py writes the release version here
 local address = "127.0.0.1"
 local port = 4445 -- recorder listens here
 local controlPort = 4446 -- we listen here for the recorder's commands
@@ -102,6 +103,7 @@ local function sendConfig(veh, role)
     type = "config",
     vid = vid,
     role = role,
+    modVersion = version,
     model = veh:getJBeamFilename(),
     partConfigFilename = config.partConfigFilename,
     career = career or false,
@@ -219,7 +221,7 @@ local function onExtensionLoaded()
     control:close()
     control = nil
   end
-  log("I", "tuningTelemetry", string.format("Loaded, sending to %s:%d, commands on %d", address, port, controlPort))
+  log("I", "tuningTelemetry", string.format("Loaded version %s, sending to %s:%d, commands on %d", version, address, port, controlPort))
 end
 
 local function onExtensionUnloaded()

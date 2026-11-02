@@ -16,10 +16,38 @@ vehicle's parts and tuning can be adjusted from that.
 | `recorder/recorder_gui.py` | The recorder window (`record_gui.cmd`). |
 | `recorder/recorder.py` | The console recorder (`record.cmd`), e.g. `py recorder\recorder.py --mode drift`. |
 | `test/fake_sender.py` | Pretends to be the game, to test the recorder without BeamNG. |
+| `build.py` | Builds the release zips into `dist/`. |
+| `.github/workflows/release.yml` | Builds and publishes a GitHub release when a `v*` tag is pushed. |
+
+## Install from a release
+
+1. Download `tuning_telemetry_<version>.zip` and put it, still zipped, in
+   `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods`. Enable it in the game's mod manager
+   if it isn't already.
+2. Download `tuning_telemetry_recorder_<version>.zip` and unzip it anywhere. It needs
+   [Python 3.9 or newer](https://www.python.org/downloads/) (standard library only).
+   Sessions are saved in a `sessions` folder next to it.
+3. Carry on from step 2 of **Use** below.
+
+Don't have the release zip and the `install.ps1` development copy
+(`mods\unpacked\tuning_telemetry`) installed at the same time: both would load.
+
+## Making a release
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow checks that the Lua and Python compile, runs `build.py` with the tag's version
+(written into the mod, so each recording's config says which version made it) and attaches
+both zips to a new GitHub release. A tag with a hyphen (`v1.1.0-beta1`) is marked as a
+pre-release. To build locally: `py build.py` (or `--version 1.0.0`).
 
 ## Use
 
-1. Run `install.ps1` once (and again after changing anything in `mod/`).
+1. Run `install.ps1` once (and again after changing anything in `mod/`); or install a
+   release as above.
 2. Start the recorder: double-click `record_gui.cmd` (window) or `record.cmd` (console).
 3. Pick the **driving mode** in the dropdown (see below). The game switches within a
    couple of seconds; the status bar shows the mode the game confirmed.

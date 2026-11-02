@@ -274,7 +274,7 @@ class Recorder:
             role = " (coupled)" if msg.get("role") == "trailer" else ""
             if msg.get("role") != "trailer":
                 self.vehicle = {"model": msg.get("model"), "vid": msg.get("vid"), "where": where}
-            self.on_log(f"[config] {msg.get('model')}{role} (vehicle {msg.get('vid')}, {where}), "
+            self.on_log(f"[config] {msg.get('model')}{role} (vehicle {msg.get('vid')}, {where}, mod {msg.get('modVersion', '?')}), "
                         f"{len(msg.get('parts') or {})} parts, {len(msg.get('vars') or {})} tuning vars")
         elif kind == "meta" and new:
             dampers = msg.get("dampers") or []
