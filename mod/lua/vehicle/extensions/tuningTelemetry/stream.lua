@@ -363,6 +363,90 @@ local function buildFrame()
   return f
 end
 
+-- In-game graph (GE extension tuningTelemetry_graph). While it asks for data, each frame's
+-- chosen values go to it as well as to the recorder, and the list of available fields every 2 s.
+local graphKeys -- list of flattened field names the graph wants, in its order; nil = graph off
+local graphVer = 0
+local graphLastAsk = 0 -- simTime of the graph's last request; it stops if the graph goes quiet
+local graphCatalogTimer = 0
+local graphTimeout = 3
+local graphCatalogPeriod = 2
+local skipTop = {type = true, vid = true, role = true, seq = true, t = true}
+
+-- the frame's numbers as one flat table: "rpm", "w.FL.slip", "d.RR", "ex.tq", "fuelx.afr"...
+local function flatten(f)
+  local out = {}
+  for k, val in pairs(f) do
+    if not skipTop[k] then
+      local tv = type(val)
+      if tv == "number" then
+        out[k] = val
+      elseif tv == "boolean" then
+        out[k] = val and 1 or 0
+      elseif k == "pos" then
+        out["pos.x"], out["pos.y"], out["pos.z"] = val[1], val[2], val[3]
+      elseif k == "w" then
+        for _, tw in ipairs(val) do
+          for wk, wv in pairs(tw) do
+            if type(wv) == "number" and wk ~= "mat" then out["w." .. tostring(tw.n) .. "." .. wk] = wv end
+          end
+        end
+      elseif k == "d" then
+        for _, dm in ipairs(val) do
+          if type(dm.c) == "number" then out["d." .. tostring(dm.n)] = dm.c end
+        end
+      elseif tv == "table" then -- ex, fuelx
+        for sk, sv in pairs(val) do
+          if type(sv) == "number" then out[k .. "." .. sk] = sv end
+        end
+      end
+    end
+  end
+  return out
+end
+
+local function num(x)
+  return x and string.format("%.6g", x) or "nil"
+end
+
+local function sendGraph(f, dt)
+  if simTime - graphLastAsk > graphTimeout then
+    graphKeys = nil
+    return
+  end
+  local flat = flatten(f)
+  graphCatalogTimer = graphCatalogTimer - dt
+  if graphCatalogTimer <= 0 then
+    graphCatalogTimer = graphCatalogPeriod
+    local keys = {}
+    for k in pairs(flat) do keys[#keys + 1] = k end
+    table.sort(keys)
+    obj:queueGameEngineLua(string.format(
+      "if extensions.tuningTelemetry_graph then extensions.tuningTelemetry_graph.onCatalog(%d, %q, %d, %s) end",
+      objectId, modeName, current.rate, serialize(keys)))
+  end
+  if #graphKeys == 0 then return end
+  local vals = {}
+  for i, k in ipairs(graphKeys) do vals[i] = num(flat[k]) end
+  obj:queueGameEngineLua(string.format(
+    "if extensions.tuningTelemetry_graph then extensions.tuningTelemetry_graph.onData(%d, %d, %s, {%s}) end",
+    objectId, graphVer, num(f.t), table.concat(vals, ",")))
+end
+
+-- called by the graph about once a second while it wants data; keys = nil switches it off
+local function setGraph(ver, keys)
+  graphLastAsk = simTime
+  if keys == nil then
+    graphKeys = nil
+    return
+  end
+  if ver ~= graphVer or not graphKeys then
+    graphVer = ver
+    graphKeys = keys
+    graphCatalogTimer = 0 -- send the field list with the next frame
+  end
+end
+
 local function applyMode()
   current = role == "trailer" and trailerMode or modes[modeName]
   has = {}
@@ -396,15 +480,21 @@ local function updateGFX(dt)
 
   sendTimer = sendTimer + dt
   if sendTimer < sendPeriod then return end
+  local elapsed = sendTimer - sendTimer % sendPeriod
   sendTimer = sendTimer % sendPeriod
   seq = seq + 1
-  send(buildFrame())
+  local f = buildFrame()
+  send(f)
+  if graphKeys and role == "driver" then sendGraph(f, elapsed) end
 end
 
 local function mark()
   markCount = markCount + 1
   send({type = "mark", vid = objectId, n = markCount, t = r(simTime, 3), seq = seq})
   obj:queueGameEngineLua(string.format("ui_message(%q, 3, 'tuningTelemetry')", "Telemetry mark " .. markCount))
+  obj:queueGameEngineLua(string.format(
+    "if extensions.tuningTelemetry_graph then extensions.tuningTelemetry_graph.onMark(%d, %s, %d) end",
+    objectId, num(r(simTime, 3)), markCount))
 end
 
 local function onReset()
@@ -437,5 +527,6 @@ M.onReset = onReset
 M.updateGFX = updateGFX
 M.mark = mark
 M.configure = configure
+M.setGraph = setGraph
 
 return M

@@ -5,6 +5,10 @@
     {
       "action":"tuningTelemetry_mark",
       "control":"alt m"
+    },
+    {
+      "action":"tuningTelemetry_graph",
+      "control":"ctrl alt shift g"
     }
   ]
 }

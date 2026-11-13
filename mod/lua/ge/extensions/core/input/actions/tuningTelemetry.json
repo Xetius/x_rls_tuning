@@ -6,5 +6,13 @@
     "onDown": "if extensions.tuningTelemetry_main then extensions.tuningTelemetry_main.mark() end",
     "title": "Mark moment",
     "desc": "Drop a marker in the telemetry recording at the moment something goes wrong"
+  },
+  "tuningTelemetry_graph": {
+    "cat": "tuningTelemetry",
+    "order": 2,
+    "ctx": "tlua",
+    "onDown": "if extensions.tuningTelemetry_graph then extensions.tuningTelemetry_graph.toggleWindow() end",
+    "title": "Telemetry graph",
+    "desc": "Show or hide the live telemetry graph window"
   }
 }

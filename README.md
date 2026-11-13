@@ -59,6 +59,29 @@ pre-release. To build locally: `py build.py` (or `--version 1.0.0`).
 6. **New session** starts a new folder (e.g. for a different car or discipline);
    closing the window stops recording.
 
+### Telemetry graph (in game)
+
+Press **Ctrl+Alt+Shift+G** (rebindable under Controls → Tuning Telemetry → "Telemetry
+graph") to open a live graph window in game. The recorder doesn't need to be running.
+
+- **Pick values** on the left: tick fields in the groups (Driver inputs, Chassis, Wheels,
+  Dampers...), use the filter box, or choose a **preset** (Steering feel, Traction,
+  Braking, Engine, Suspension). Up to 12 values.
+- Each value has a colour and a **plot** (P1–P4). Values on the same plot share an axis,
+  so give values with very different scales their own plot. The x button removes one.
+- Values are shown in readable units (mph, g, degrees, percent, psi). The fields on
+  offer depend on the driving mode, which the toolbar shows with its rate.
+- **Hover** over the plots to read every value at that moment. Marks (Alt+M) show as
+  vertical lines labelled M1, M2...
+- **Pause** freezes the graph, **Clear** empties it, and the slider sets how many seconds
+  are shown (5–120).
+- **Keep recording while closed** (on by default) keeps collecting the picked values
+  while the window is shut, so you can open it after a lap and see what happened.
+- Your picks and settings are saved in `settings/tuningTelemetry/graph.json`.
+
+Only the picked values are sent to the graph, and nothing is sent once the window is
+closed with keep-recording off or no values picked.
+
 ### Driving modes
 
 The mode decides which fields are sent and how often, so the files hold what matters for
@@ -120,7 +143,8 @@ once per distinct content). Each line also has `rt`, the wall-clock receive time
 
 - Used in game with RLS Career Overhaul since 2026-11-02. Not yet tested in game: the
   `fuelx` readings, driving modes, trailer frames, `hdg`/`slipAng`/`pm`, and the recorder
-  window (tested against `test/fake_sender.py` only).
+  window (tested against `test/fake_sender.py` only), and the graph window (tested
+  against stand-ins for the game only).
 - Not recorded yet: the pulling force on a hitch or sled.
 - Shock absorbers are found by their `vkTag: damper_XX` tag (vanilla cars). Cars without
   the tag fall back to a heuristic (split bump/rebound damping, no spring); check the
