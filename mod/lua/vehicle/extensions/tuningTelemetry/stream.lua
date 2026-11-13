@@ -205,6 +205,37 @@ local function rlsFuel()
   }
 end
 
+-- The game's engine warnings and damage (damageTracker "engine" group), named as in combustionEngine.lua
+-- and combustionEngineThermals.lua
+local engineFlagNames = {
+  "overTorqueDanger", "overRevDanger", "mildOverrevDamage", "catastrophicOverrevDamage",
+  "catastrophicOverTorqueDamage", "engineDisabled", "engineLockedUp", "engineReducedTorque",
+  "engineIsHydrolocking", "engineHydrolocked", "impactDamage", "coolantOverheating", "oilOverheating",
+  "oilLevelCritical", "oilLevelTooHigh", "starvedOfOil", "headGasketDamaged", "pistonRingsDamaged",
+  "rodBearingsDamaged", "blockMelted", "cylinderWallsMelted", "oilpanLeak", "oilRadiatorLeak",
+  "radiatorLeak", "exhaustBroken",
+}
+
+-- Engine torque against its rating. Past the rating, otd builds by (Nm over) per second and the
+-- engine locks up when it reaches otdMax. Fuel multipliers (RLS Nitro 90) count towards the torque.
+local function engineLimits()
+  if not engine or not engine.combustionTorque then return nil end
+  local x = {
+    tq = r(engine.combustionTorque, 0),
+    lim = engine.maxTorqueRating and engine.maxTorqueRating > 0 and r(engine.maxTorqueRating, 0) or nil,
+    otd = r(engine.overTorqueDamage, 1),
+    otdMax = r(engine.maxOverTorqueDamage, 0),
+    ord = r(engine.overRevDamage, 3), -- 0-1, chance of valve or lockup damage while over-revving
+  }
+  for _, name in ipairs(engineFlagNames) do
+    if damageTracker.getDamage("engine", name) then
+      x.flags = x.flags or {}
+      table.insert(x.flags, name)
+    end
+  end
+  return x
+end
+
 local function buildWheels()
   local w = {}
   for _, wd in pairs(wheels.wheels) do
@@ -282,6 +313,11 @@ local function buildFrame()
     f.pbrk = r(e.parkingbrake, 2)
     f.load = r(e.engineLoad, 3)
     f.boost = r(e.turboBoost, 2)
+    f.ex = engineLimits()
+    f.cel = (e.checkengine == true or e.checkengine == 1) or nil -- electrics starts it at 0, which Lua counts as true
+    f.ffb = r(hydros.forceAtWheelNorm, 3) -- steering force sent to the wheel (0-1 of the game's maximum, signed); nil without a force feedback wheel
+    f.ffbOut = r(hydros.forceAtDriverNorm, 3) -- the same after damping and softlock
+    f.ffbLim = r(hydros.curForceLimitNorm, 3)
   end
   if has.chassis then
     local roll, pitch = obj:getRollPitchYaw()

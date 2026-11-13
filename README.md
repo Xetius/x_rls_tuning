@@ -95,6 +95,12 @@ Each frame (`type: "frame"`):
   surface material.
 - **`d`, per shock absorber:** compression in mm relative to its length when the car spawned.
 - **`gin`, `revLim`:** gearbox input rpm and whether the rev limiter is cutting.
+- **`ex`, engine limits:** engine torque (`tq`, Nm) against its rating (`lim`), the over-torque
+  damage built up (`otd`; the engine locks up at `otdMax`), over-rev damage (`ord`, 0-1), and the
+  game's active engine warnings and damage by name (`flags`). `cel` is the check engine light.
+- **`ffb`, `ffbOut`, `ffbLim`:** the steering force sent to a force feedback wheel, as a signed 0-1
+  fraction of the game's maximum, before (`ffb`) and after (`ffbOut`) damping and softlock, and the
+  current force limit. Absent without a force feedback wheel.
 - **`pm`:** the mode of each switchable diff, transfer case and range box (e.g. `open`,
   `locked`, `lsd`; 4WD `connected` / `disconnected`; range `high` / `low`).
 - **`chute`:** 1 while Meo's drag parachute is deployed (absent on cars without one).
