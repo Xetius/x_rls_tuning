@@ -32,6 +32,11 @@ local marks = {} -- {t=, n=}
 local dataVid, lastT
 local askTimer = ASK_PERIOD
 local dirty = false
+local saveAt = 0 -- settings are written a second after the last change, not on every slider step
+local clockNow = 0 -- real seconds since load
+local dataVer = 0 -- bumped on new samples, marks or a clear; the plots rebuild from it
+local layoutVer = 0 -- bumped when the selection or plot assignment changes
+local catalogVer = 0
 
 -- ---------------------------------------------------------------- field descriptions
 
@@ -121,18 +126,30 @@ local wheelInfo = {
 local groupOrder = {"Driver inputs", "Speed & engine", "Chassis", "Force feedback", "Driver aids",
   "Wheels", "Dampers", "Temperatures & fuel", "Engine limits", "RLS fuel model", "Other"}
 
-local function describe(key)
+local function describeUncached(key)
   local i = info[key]
   if i then return i[1], i[2], i[3], i[4] end
   local wheel, field = key:match("^w%.([^.]+)%.(.+)$")
   if wheel then
     local wi = wheelInfo[field]
-    if wi then return wheel .. " " .. wi[1], wi[2], wi[3], "Wheels", wheel end
-    return wheel .. " " .. field, "", 1, "Wheels", wheel
+    if wi then return wheel .. " " .. wi[1], wi[2], wi[3], "Wheels" end
+    return wheel .. " " .. field, "", 1, "Wheels"
   end
   local damper = key:match("^d%.(.+)$")
   if damper then return damper .. " damper compression", "mm", 1, "Dampers" end
   return key, "", 1, "Other"
+end
+
+-- label, unit, scale, group; worked out once per key
+local descCache = {}
+local function describe(key)
+  local d = descCache[key]
+  if not d then
+    local name, unit, scale, group = describeUncached(key)
+    d = {name, unit, scale, group, name .. (unit ~= "" and (" (" .. unit .. ")") or "")}
+    descCache[key] = d
+  end
+  return d[1], d[2], d[3], d[4], d[5]
 end
 
 local palette = {
@@ -177,10 +194,16 @@ local function saveSettings()
   jsonWriteFile(SETTINGS, {fields = list, window = windowSecs[0], recordHidden = recordHidden[0]}, true)
 end
 
+local function markDirty()
+  dirty = true
+  saveAt = clockNow + 1
+end
+
 local function selectionChanged()
   selVer = selVer + 1
+  layoutVer = layoutVer + 1
   askTimer = ASK_PERIOD -- tell the vehicle on this frame
-  dirty = true
+  markDirty()
 end
 
 local function addField(key, plot)
@@ -208,6 +231,7 @@ end
 
 local function clearData()
   samples, first, marks, lastT = {}, 1, {}, nil
+  dataVer = dataVer + 1
 end
 
 -- ---------------------------------------------------------------- data from the vehicle
@@ -234,8 +258,18 @@ local function ask(veh, on)
 end
 
 function M.onCatalog(vid, mode, rate, keys)
-  catalog = keys or {}
-  catalogInfo = {vid = vid, mode = mode, rate = rate}
+  keys = keys or {}
+  local same = #keys == #catalog
+  if same then
+    for i = 1, #keys do
+      if keys[i] ~= catalog[i] then same = false break end
+    end
+  end
+  if not same then
+    catalog = keys
+    catalogVer = catalogVer + 1
+  end
+  catalogInfo.vid, catalogInfo.mode, catalogInfo.rate = vid, mode, rate
 end
 
 function M.onData(vid, ver, t, vals)
@@ -257,13 +291,62 @@ function M.onData(vid, ver, t, vals)
     for i = first, #samples do kept[#kept + 1] = samples[i] end
     samples, first = kept, 1
   end
+  dataVer = dataVer + 1
 end
 
 function M.onMark(vid, t, n)
-  if vid == dataVid and t then marks[#marks + 1] = {t = t, n = n} end
+  if vid == dataVid and t then
+    marks[#marks + 1] = {t = t, n = n, label = "M" .. tostring(n)}
+    dataVer = dataVer + 1
+  end
 end
 
 -- ---------------------------------------------------------------- drawing
+-- The plot lines are worked out at most REBUILD_PERIOD apart (or when the layout changes) and kept
+-- as plain numbers; every frame only replays them. Two scratch vectors are reused for every draw
+-- call, so drawing makes no garbage.
+
+local REBUILD_PERIOD = 0.05 -- seconds: plots follow the data at up to 20 updates a second
+local COLUMN = 2 -- pixels per column of the line simplification
+
+local v1, v2 -- scratch ImVec2s, made on first draw
+local colors -- U32 colours, made on first draw (they need an imgui context)
+local paletteU32 = {}
+
+local function setupDraw()
+  if v1 then return end
+  v1, v2 = im.ImVec2(0, 0), im.ImVec2(0, 0)
+  colors = {
+    bg = im.GetColorU322(im.ImVec4(0.08, 0.08, 0.10, 0.9)),
+    border = im.GetColorU322(im.ImVec4(0.35, 0.35, 0.40, 1)),
+    grid = im.GetColorU322(im.ImVec4(1, 1, 1, 0.08)),
+    zero = im.GetColorU322(im.ImVec4(1, 1, 1, 0.25)),
+    label = im.GetColorU322(im.ImVec4(0.7, 0.7, 0.7, 1)),
+    dim = im.GetColorU322(im.ImVec4(0.6, 0.6, 0.6, 1)),
+    mark = im.GetColorU322(im.ImVec4(1, 0.85, 0.2, 0.7)),
+    markText = im.GetColorU322(im.ImVec4(1, 0.85, 0.2, 1)),
+    cursor = im.GetColorU322(im.ImVec4(1, 1, 1, 0.5)),
+    white = im.GetColorU322(im.ImVec4(1, 1, 1, 1)),
+  }
+  for i, c in ipairs(palette) do paletteU32[i] = im.GetColorU322(im.ImVec4(c[1], c[2], c[3], 1)) end
+end
+
+local function line(dl, x1, y1, x2, y2, col, thick)
+  v1.x, v1.y, v2.x, v2.y = x1, y1, x2, y2
+  im.ImDrawList_AddLine(dl, v1, v2, col, thick or 1)
+end
+local function rectFilled(dl, x1, y1, x2, y2, col)
+  v1.x, v1.y, v2.x, v2.y = x1, y1, x2, y2
+  im.ImDrawList_AddRectFilled(dl, v1, v2, col)
+end
+local function rect(dl, x1, y1, x2, y2, col)
+  v1.x, v1.y, v2.x, v2.y = x1, y1, x2, y2
+  im.ImDrawList_AddRect(dl, v1, v2, col)
+end
+local function text(dl, x, y, col, str)
+  v1.x, v1.y = x, y
+  im.ImDrawList_AddText1(dl, v1, col, str)
+end
 
 local function fmt(x)
   if x == nil then return "-" end
@@ -285,27 +368,36 @@ local function sampleAt(t)
   return lo
 end
 
-local function drawPlot(dl, x0, y0, w, h, plotIdx, tEnd, span, hoverT)
-  local series = {}
+local function legendText(s, idx)
+  local name, unit, scale = describe(s.key)
+  local val = idx and samples[idx] and samples[idx].v[s.key]
+  return string.format("%s: %s %s", name, val and fmt(val * scale) or "-", unit)
+end
+
+-- cached plot geometry, relative to each plot's top-left corner
+local geo = {plots = {}, builtAt = -1, dataVer = -1, layoutVer = -1, w = 0, h = 0, span = 0, nPlots = 0, tEnd = 0, axis = {}, nAxis = 0}
+
+local function buildPlot(pc, plotIdx, w, h, tEnd, span)
+  local series = pc.series
+  local n = 0
   for _, s in ipairs(selected) do
-    if s.plot == plotIdx then series[#series + 1] = s end
+    if s.plot == plotIdx then
+      n = n + 1
+      series[n] = s
+    end
   end
-  im.ImDrawList_AddRectFilled(dl, im.ImVec2(x0, y0), im.ImVec2(x0 + w, y0 + h), im.GetColorU322(im.ImVec4(0.08, 0.08, 0.10, 0.9)))
-  im.ImDrawList_AddRect(dl, im.ImVec2(x0, y0), im.ImVec2(x0 + w, y0 + h), im.GetColorU322(im.ImVec4(0.35, 0.35, 0.40, 1)))
-  if #series == 0 then
-    im.ImDrawList_AddText1(dl, im.ImVec2(x0 + 6, y0 + 4), im.GetColorU322(im.ImVec4(0.6, 0.6, 0.6, 1)), "Plot " .. plotIdx .. ": nothing assigned")
-    return
-  end
+  for i = n + 1, #series do series[i] = nil end
+  if n == 0 then return end
 
   local tStart = tEnd - span
   local i0 = sampleAt(tStart) or first
 
-  -- scale: range of everything visible on this plot
   local lo, hi = math.huge, -math.huge
   for _, s in ipairs(series) do
     local _, _, scale = describe(s.key)
+    local key = s.key
     for i = i0, #samples do
-      local val = samples[i].v[s.key]
+      local val = samples[i].v[key]
       if val then
         val = val * scale
         if val < lo then lo = val end
@@ -317,51 +409,55 @@ local function drawPlot(dl, x0, y0, w, h, plotIdx, tEnd, span, hoverT)
   if hi - lo < 1e-6 then lo, hi = lo - 1, hi + 1 end
   local pad = (hi - lo) * 0.06
   lo, hi = lo - pad, hi + pad
-  local function py(val) return y0 + h - (val - lo) / (hi - lo) * h end
-  local function px(t) return x0 + (t - tStart) / span * w end
+  local yk = h / (hi - lo)
+  local xk = w / span
 
-  -- grid and labels
-  local grid = im.GetColorU322(im.ImVec4(1, 1, 1, 0.08))
-  local label = im.GetColorU322(im.ImVec4(0.7, 0.7, 0.7, 1))
   for k = 0, 4 do
     local val = lo + (hi - lo) * k / 4
-    local y = py(val)
-    im.ImDrawList_AddLine(dl, im.ImVec2(x0, y), im.ImVec2(x0 + w, y), grid)
-    if k > 0 and k < 4 then im.ImDrawList_AddText1(dl, im.ImVec2(x0 + w - 60, y - 14), label, fmt(val)) end
+    pc.gridY[k] = h - (val - lo) * yk
+    pc.gridText[k] = fmt(val)
   end
-  if lo < 0 and hi > 0 then
-    im.ImDrawList_AddLine(dl, im.ImVec2(x0, py(0)), im.ImVec2(x0 + w, py(0)), im.GetColorU322(im.ImVec4(1, 1, 1, 0.25)))
-  end
+  pc.zeroY = (lo < 0 and hi > 0) and (h + lo * yk) or nil
+
+  local nm = 0
   for _, m in ipairs(marks) do
     if m.t >= tStart and m.t <= tEnd then
-      local x = px(m.t)
-      im.ImDrawList_AddLine(dl, im.ImVec2(x, y0), im.ImVec2(x, y0 + h), im.GetColorU322(im.ImVec4(1, 0.85, 0.2, 0.7)), 1.5)
-      im.ImDrawList_AddText1(dl, im.ImVec2(x + 3, y0 + h - 16), im.GetColorU322(im.ImVec4(1, 0.85, 0.2, 1)), "M" .. m.n)
+      nm = nm + 1
+      pc.markX[nm], pc.markText[nm] = (m.t - tStart) * xk, m.label
     end
   end
+  pc.nMarks = nm
 
-  -- lines: one column of pixels at a time (min/max when samples are denser than pixels)
-  for _, s in ipairs(series) do
+  for j, s in ipairs(series) do
     local _, _, scale = describe(s.key)
-    local col = colU32(palette[s.color])
-    local colX, cMin, cMax, cFirst, cLast
-    local prevX, prevY
+    local key = s.key
+    local segs = pc.segs[j] or {}
+    pc.segs[j] = segs
+    local ns = 0
+    local colX, cMin, cMax, cFirst, cLast, prevX, prevY
     local function flush()
       if not colX then return end
-      local yF, yL = py(cFirst), py(cLast)
-      if prevX then im.ImDrawList_AddLine(dl, im.ImVec2(prevX, prevY), im.ImVec2(colX, yF), col, 1.5) end
-      if cMax > cMin then im.ImDrawList_AddLine(dl, im.ImVec2(colX, py(cMin)), im.ImVec2(colX, py(cMax)), col, 1.5) end
-      prevX, prevY = colX, yL
+      local yF = h - (cFirst - lo) * yk
+      if prevX then
+        segs[ns + 1], segs[ns + 2], segs[ns + 3], segs[ns + 4] = prevX, prevY, colX, yF
+        ns = ns + 4
+      end
+      local yMin, yMax = h - (cMin - lo) * yk, h - (cMax - lo) * yk
+      if yMin - yMax >= 1.5 then
+        segs[ns + 1], segs[ns + 2], segs[ns + 3], segs[ns + 4] = colX, yMax, colX, yMin
+        ns = ns + 4
+      end
+      prevX, prevY = colX, h - (cLast - lo) * yk
     end
     for i = i0, #samples do
       local smp = samples[i]
-      local val = smp.v[s.key]
+      local val = smp.v[key]
       if val == nil then
         flush()
         colX, prevX = nil, nil -- gap in the data
       else
         val = val * scale
-        local x = math.floor(px(smp.t)) + 0.5
+        local x = math.floor((smp.t - tStart) * xk / COLUMN) * COLUMN + 0.5
         if x ~= colX then
           flush()
           colX, cMin, cMax, cFirst, cLast = x, val, val, val, val
@@ -373,74 +469,152 @@ local function drawPlot(dl, x0, y0, w, h, plotIdx, tEnd, span, hoverT)
       end
     end
     flush()
+    pc.nSegs[j] = ns
+    pc.legend[j] = legendText(s, #samples)
   end
+end
 
-  -- legend with the latest (or hovered) value
-  local idx = hoverT and sampleAt(hoverT) or #samples
+local function drawPlot(dl, x0, y0, w, h, pc, hoverIdx)
+  rectFilled(dl, x0, y0, x0 + w, y0 + h, colors.bg)
+  rect(dl, x0, y0, x0 + w, y0 + h, colors.border)
+  local series = pc.series
+  if #series == 0 then
+    text(dl, x0 + 6, y0 + 4, colors.dim, pc.emptyText)
+    return
+  end
+  for k = 0, 4 do
+    local y = y0 + pc.gridY[k]
+    line(dl, x0, y, x0 + w, y, colors.grid)
+    if k > 0 and k < 4 then text(dl, x0 + w - 60, y - 14, colors.label, pc.gridText[k]) end
+  end
+  if pc.zeroY then line(dl, x0, y0 + pc.zeroY, x0 + w, y0 + pc.zeroY, colors.zero) end
+  for i = 1, pc.nMarks do
+    local x = x0 + pc.markX[i]
+    line(dl, x, y0, x, y0 + h, colors.mark, 1.5)
+    text(dl, x + 3, y0 + h - 16, colors.markText, pc.markText[i])
+  end
+  for j, s in ipairs(series) do
+    local col = paletteU32[s.color] or colors.white
+    local segs = pc.segs[j]
+    for k = 1, pc.nSegs[j], 4 do
+      line(dl, x0 + segs[k], y0 + segs[k + 1], x0 + segs[k + 2], y0 + segs[k + 3], col, 1.5)
+    end
+  end
   local ly = y0 + 4
-  for _, s in ipairs(series) do
-    local name, unit, scale = describe(s.key)
-    local val = idx and samples[idx] and samples[idx].v[s.key]
-    local text = string.format("%s: %s %s", name, val and fmt(val * scale) or "-", unit)
-    im.ImDrawList_AddRectFilled(dl, im.ImVec2(x0 + 6, ly + 4), im.ImVec2(x0 + 16, ly + 12), colU32(palette[s.color]))
-    im.ImDrawList_AddText1(dl, im.ImVec2(x0 + 20, ly), colU32(palette[s.color]), text)
+  for j, s in ipairs(series) do
+    local col = paletteU32[s.color] or colors.white
+    rectFilled(dl, x0 + 6, ly + 4, x0 + 16, ly + 12, col)
+    text(dl, x0 + 20, ly, col, hoverIdx and legendText(s, hoverIdx) or pc.legend[j])
     ly = ly + 16
   end
 end
 
 local function drawPlots()
+  setupDraw()
   local avail = im.GetContentRegionAvail()
   local w, h = math.max(avail.x, 100), math.max(avail.y - 22, 100)
   local origin = im.GetCursorScreenPos()
+  local ox, oy = origin.x, origin.y
   local nPlots = 1
   for _, s in ipairs(selected) do nPlots = math.max(nPlots, s.plot) end
   local gap = 6
   local ph = (h - gap * (nPlots - 1)) / nPlots
 
-  im.InvisibleButton("##ttGraphArea", im.ImVec2(w, h))
+  v1.x, v1.y = w, h
+  im.InvisibleButton("##ttGraphArea", v1)
   local hovered = im.IsItemHovered()
   local dl = im.GetWindowDrawList()
 
   local span = windowSecs[0]
   local tEnd = (#samples >= first and samples[#samples]) and samples[#samples].t or span
-  local hoverT
+
+  -- rebuild the geometry when the layout changed, or new data arrived and enough time passed
+  local layoutChanged = geo.layoutVer ~= layoutVer or geo.w ~= w or geo.h ~= h or geo.span ~= span or geo.nPlots ~= nPlots
+  if layoutChanged or (geo.dataVer ~= dataVer and clockNow - geo.builtAt >= REBUILD_PERIOD) then
+    for p = 1, nPlots do
+      local pc = geo.plots[p]
+      if not pc then
+        pc = {series = {}, segs = {}, nSegs = {}, legend = {}, gridY = {}, gridText = {}, markX = {}, markText = {}, nMarks = 0,
+          emptyText = "Plot " .. p .. ": nothing assigned"}
+        geo.plots[p] = pc
+      end
+      buildPlot(pc, p, w, ph, tEnd, span)
+    end
+    geo.builtAt, geo.dataVer, geo.layoutVer, geo.w, geo.h, geo.span, geo.nPlots, geo.tEnd = clockNow, dataVer, layoutVer, w, h, span, nPlots, tEnd
+    -- time axis labels: seconds before the newest sample
+    local step = span <= 10 and 1 or (span <= 30 and 5 or (span <= 60 and 10 or 20))
+    local na = 0
+    for s = 0, span, step do
+      na = na + 1
+      local a = geo.axis[na] or {}
+      geo.axis[na] = a
+      a.x = math.min(w - s / span * w, w - 30)
+      a.text = s == 0 and "now" or ("-" .. s .. " s")
+    end
+    geo.nAxis = na
+  end
+
+  local hoverT, hoverIdx
   if hovered and #samples >= first then
-    local mx = im.GetMousePos().x
-    hoverT = tEnd - span + (mx - origin.x) / w * span
+    hoverT = geo.tEnd - span + (im.GetMousePos().x - ox) / w * span
+    hoverIdx = sampleAt(hoverT)
   end
   for p = 1, nPlots do
-    drawPlot(dl, origin.x, origin.y + (p - 1) * (ph + gap), w, ph, p, tEnd, span, hoverT)
+    drawPlot(dl, ox, oy + (p - 1) * (ph + gap), w, ph, geo.plots[p], hoverIdx)
   end
   if hoverT then
-    local x = origin.x + (hoverT - (tEnd - span)) / span * w
-    im.ImDrawList_AddLine(dl, im.ImVec2(x, origin.y), im.ImVec2(x, origin.y + h), im.GetColorU322(im.ImVec4(1, 1, 1, 0.5)))
+    local x = ox + (hoverT - (geo.tEnd - span)) / span * w
+    line(dl, x, oy, x, oy + h, colors.cursor)
   end
-  -- time axis: seconds before the newest sample
-  local label = im.GetColorU322(im.ImVec4(0.7, 0.7, 0.7, 1))
-  local step = span <= 10 and 1 or (span <= 30 and 5 or (span <= 60 and 10 or 20))
-  for s = 0, span, step do
-    local x = origin.x + w - s / span * w
-    im.ImDrawList_AddText1(dl, im.ImVec2(math.min(x, origin.x + w - 30), origin.y + h + 3), label, s == 0 and "now" or ("-" .. s .. " s"))
+  for i = 1, geo.nAxis do
+    text(dl, ox + geo.axis[i].x, oy + h + 3, colors.label, geo.axis[i].text)
   end
   if hoverT then
-    im.ImDrawList_AddText1(dl, im.ImVec2(origin.x + 4, origin.y + h + 3), im.GetColorU322(im.ImVec4(1, 1, 1, 1)),
-      string.format("cursor %.2f s before now", tEnd - hoverT))
+    text(dl, ox + 4, oy + h + 3, colors.white, string.format("cursor %.2f s before now", geo.tEnd - hoverT))
   end
-  im.Dummy(im.ImVec2(w, 20))
+  v1.x, v1.y = w, 20
+  im.Dummy(v1)
+end
+
+-- the grouped, filtered list of values; rebuilt only when the catalog or the filter changes
+local picker = {catalogVer = -1, filter = nil, groups = {}}
+local checkPtr = im.BoolPtr(false)
+local plotNames = {}
+for p = 1, MAX_PLOTS do plotNames[p] = {short = "P" .. p, long = "Plot " .. p} end
+
+local function buildPicker(filter)
+  local byGroup = {}
+  for _, key in ipairs(catalog) do
+    local name, _, _, group, label = describe(key)
+    if filter == "" or name:lower():find(filter, 1, true) or key:lower():find(filter, 1, true) then
+      byGroup[group] = byGroup[group] or {}
+      table.insert(byGroup[group], {key = key, name = name, label = label .. "##" .. key})
+    end
+  end
+  local groups = {}
+  for _, group in ipairs(groupOrder) do
+    local list = byGroup[group]
+    if list then
+      table.sort(list, function(a, b) return a.name < b.name end)
+      groups[#groups + 1] = {header = string.format("%s (%d)##grp%s", group, #list, group), items = list}
+    end
+  end
+  picker.groups, picker.catalogVer, picker.filter = groups, catalogVer, filter
 end
 
 local function drawPicker()
+  setupDraw()
   im.TextUnformatted(string.format("Selected (%d/%d):", #selected, MAX_FIELDS))
   local removeKey, changed
-  for i, s in ipairs(selected) do
-    im.PushID1("sel" .. i)
-    local name, unit = describe(s.key)
-    im.ColorButton("##c", im.ImVec4(palette[s.color][1], palette[s.color][2], palette[s.color][3], 1), 0, im.ImVec2(12, 12))
+  for _, s in ipairs(selected) do
+    im.PushID1(s.key)
+    local c = palette[s.color]
+    im.ColorButton("##c", im.ImVec4(c[1], c[2], c[3], 1), 0, im.ImVec2(12, 12))
     im.SameLine()
     im.SetNextItemWidth(46)
-    if im.BeginCombo("##plot", "P" .. s.plot) then
+    if im.BeginCombo("##plot", plotNames[s.plot].short) then
       for p = 1, MAX_PLOTS do
-        if im.Selectable1("Plot " .. p, s.plot == p) then
+        if im.Selectable1(plotNames[p].long, s.plot == p) then
           s.plot = p
           changed = true
         end
@@ -450,11 +624,15 @@ local function drawPicker()
     im.SameLine()
     if im.SmallButton("x") then removeKey = s.key end
     im.SameLine()
-    im.TextUnformatted(name .. (unit ~= "" and (" (" .. unit .. ")") or ""))
+    local _, _, _, _, label = describe(s.key)
+    im.TextUnformatted(label)
     im.PopID()
   end
   if removeKey then removeField(removeKey) end
-  if changed then dirty = true end
+  if changed then
+    layoutVer = layoutVer + 1
+    markDirty()
+  end
   if #selected == 0 then im.TextDisabled("Tick values below, or pick a preset.") end
 
   im.Separator()
@@ -474,27 +652,16 @@ local function drawPicker()
     im.TextWrapped("No values yet. Get in a car; the list fills in within a couple of seconds.")
     return
   end
-  -- group the keys
-  local groups = {}
-  for _, key in ipairs(catalog) do
-    local name, unit, _, group = describe(key)
-    if filter == "" or name:lower():find(filter, 1, true) or key:lower():find(filter, 1, true) then
-      groups[group] = groups[group] or {}
-      table.insert(groups[group], {key = key, name = name, unit = unit})
-    end
-  end
-  for _, group in ipairs(groupOrder) do
-    local list = groups[group]
-    if list then
-      table.sort(list, function(a, b) return a.name < b.name end)
-      if im.CollapsingHeader1(string.format("%s (%d)##grp%s", group, #list, group), filter ~= "" and im.TreeNodeFlags_DefaultOpen or 0) then
-        for _, f in ipairs(list) do
-          local on = im.BoolPtr(isSelected(f.key) ~= nil)
-          if im.Checkbox(string.format("%s%s##%s", f.name, f.unit ~= "" and (" (" .. f.unit .. ")") or "", f.key), on) then
-            if on[0] then addField(f.key, 1) else removeField(f.key) end
-          end
-          if im.IsItemHovered() then im.SetTooltip(f.key) end
+  if picker.catalogVer ~= catalogVer or picker.filter ~= filter then buildPicker(filter) end
+  local openFlag = filter ~= "" and im.TreeNodeFlags_DefaultOpen or 0
+  for _, g in ipairs(picker.groups) do
+    if im.CollapsingHeader1(g.header, openFlag) then
+      for _, f in ipairs(g.items) do
+        checkPtr[0] = isSelected(f.key) ~= nil
+        if im.Checkbox(f.label, checkPtr) then
+          if checkPtr[0] then addField(f.key, 1) else removeField(f.key) end
         end
+        if im.IsItemHovered() then im.SetTooltip(f.key) end
       end
     end
   end
@@ -508,9 +675,9 @@ local function drawWindow()
     if im.Button("Clear") then clearData() end
     im.SameLine()
     im.SetNextItemWidth(180)
-    if im.SliderFloat("Seconds shown", windowSecs, 5, MAX_SECONDS, "%.0f s") then dirty = true end
+    if im.SliderFloat("Seconds shown", windowSecs, 5, MAX_SECONDS, "%.0f s") then markDirty() end
     im.SameLine()
-    if im.Checkbox("Keep recording while closed", recordHidden) then dirty = true end
+    if im.Checkbox("Keep recording while closed", recordHidden) then markDirty() end
     im.SameLine()
     if catalogInfo.mode then
       im.TextDisabled(string.format("Driving mode: %s, %d per second", catalogInfo.mode, catalogInfo.rate or 0))
@@ -546,6 +713,8 @@ function M.toggleWindow()
 end
 
 function M.onUpdate(dtReal)
+  dtReal = dtReal or 0
+  clockNow = clockNow + dtReal
   askTimer = askTimer + dtReal
   if askTimer >= ASK_PERIOD then
     askTimer = 0
@@ -553,7 +722,7 @@ function M.onUpdate(dtReal)
     if veh then ask(veh, wantData()) end
   end
   if showWindow[0] then drawWindow() end
-  if dirty then
+  if dirty and clockNow >= saveAt then
     dirty = false
     saveSettings()
   end
